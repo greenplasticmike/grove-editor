@@ -3,9 +3,9 @@ import Foundation
 struct Folder: Identifiable, Hashable {
     let id: UUID
     let url: URL
-    var children: [Folder]?
+    var children: [FileSystemItem]?
     
-    init(url: URL, children: [Folder]? = nil) {
+    init(url: URL, children: [FileSystemItem]? = nil) {
         self.id = UUID()
         self.url = url
         self.children = children
@@ -13,5 +13,13 @@ struct Folder: Identifiable, Hashable {
     
     var name: String {
         url.lastPathComponent
+    }
+    
+    static func == (lhs: Folder, rhs: Folder) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 }

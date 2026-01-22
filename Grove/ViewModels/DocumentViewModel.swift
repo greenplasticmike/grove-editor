@@ -3,13 +3,20 @@ import Combine
 
 class DocumentViewModel: ObservableObject {
     @Published var content: String = ""
-    private var document: Document
+    let document: Document
     private var fileService = FileService()
     private var cancellables = Set<AnyCancellable>()
     
     init(document: Document) {
         self.document = document
-        self.content = document.content
+        
+        do {
+            let loadedContent = try fileService.read(from: document.url)
+            self.content = loadedContent
+        } catch {
+            print("Failed to load document content: \(error)")
+            self.content = document.content
+        }
         
         setupAutoSave()
     }
