@@ -50,4 +50,24 @@ class GitService {
             return false
         }
     }
+    
+    func diff(for file: URL) async throws -> String {
+        let output = try await shell("git", "diff", "--", file.lastPathComponent, in: file.deletingLastPathComponent())
+        return output
+    }
+    
+    func diff(in directory: URL) async throws -> String {
+        let output = try await shell("git", "diff", in: directory)
+        return output
+    }
+    
+    func restore(file: URL) async throws {
+        _ = try await shell("git", "restore", "--", file.lastPathComponent, in: file.deletingLastPathComponent())
+    }
+    
+    func show(file: URL, commit: String) async throws -> String {
+        // Show file content at a specific commit
+        let output = try await shell("git", "show", "\(commit):\(file.lastPathComponent)", in: file.deletingLastPathComponent())
+        return output
+    }
 }

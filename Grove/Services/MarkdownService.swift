@@ -8,40 +8,139 @@ class MarkdownService {
         return visitor.visit(document)
     }
     
-    // Basic CSS for styling the output
-    func getCSS() -> String {
+    func getCSS(settings: AppSettings) -> String {
+        let (textColor, bgColor, linkColor, codeBg): (String, String, String, String)
+        
+        // Base colors
+        switch settings.theme {
+        case .dark:
+            textColor = "#e0e0e0"
+            bgColor = "#1e1e1e"
+            linkColor = settings.style == .bear ? "#d85151" : "#58a6ff"
+            codeBg = "rgba(127, 127, 127, 0.15)"
+        case .light:
+            textColor = "#333333"
+            bgColor = "#ffffff"
+            linkColor = settings.style == .bear ? "#cc2222" : "#0366d6"
+            codeBg = "rgba(127, 127, 127, 0.1)"
+        case .system:
+            textColor = "var(--text-color)"
+            bgColor = "var(--bg-color)"
+            linkColor = "var(--link-color)"
+            codeBg = "var(--code-bg)"
+        }
+        
+        // Font Family logic
+        let fontFamily: String
+        let headingFont: String
+        
+        switch settings.style {
+        case .iaWriter:
+            // Monospace everything
+            fontFamily = "\"\(settings.fontFamily)\", \"Monaco\", \"Courier New\", monospace"
+            headingFont = fontFamily
+        case .bear:
+            // Sans-serif body, specific headers
+            fontFamily = "-apple-system, BlinkMacSystemFont, \"Avenir Next\", \"Avenir\", sans-serif"
+            headingFont = "-apple-system, BlinkMacSystemFont, \"Avenir Next\", \"Avenir\", sans-serif"
+        case .standard:
+            fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif"
+            headingFont = fontFamily
+        }
+        
         return """
         <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                font-size: 16px;
-                line-height: 1.6;
-                color: var(--text-color);
-                background-color: var(--bg-color);
-                padding: 20px;
-                max-width: 800px;
-                margin: 0 auto;
+            :root {
+                --text-color: #333333;
+                --bg-color: #ffffff;
+                --link-color: \(settings.style == .bear ? "#cc2222" : "#0366d6");
+                --code-bg: rgba(127, 127, 127, 0.1);
             }
             @media (prefers-color-scheme: dark) {
                 :root {
                     --text-color: #e0e0e0;
                     --bg-color: #1e1e1e;
+                    --link-color: \(settings.style == .bear ? "#d85151" : "#58a6ff");
+                    --code-bg: rgba(127, 127, 127, 0.15);
                 }
             }
-            @media (prefers-color-scheme: light) {
-                :root {
-                    --text-color: #333;
-                    --bg-color: #ffffff;
-                }
+            
+            body {
+                font-family: \(fontFamily);
+                font-size: \(Int(settings.fontSize))px;
+                line-height: \(settings.lineHeight);
+                color: \(textColor);
+                background-color: \(bgColor);
+                padding: 40px;
+                max-width: 680px;
+                margin: 0 auto;
             }
-            h1, h2, h3, h4, h5, h6 { margin-top: 1.5em; margin-bottom: 0.5em; font-weight: 600; }
+            
+            /* Typography */
+            h1, h2, h3, h4, h5, h6 {
+                font-family: \(headingFont);
+                margin-top: 1.5em;
+                margin-bottom: 0.5em;
+                font-weight: 600;
+                color: \(textColor);
+            }
+            
             p { margin-bottom: 1em; }
-            code { background-color: rgba(127, 127, 127, 0.1); padding: 2px 4px; border-radius: 4px; font-family: "Menlo", monospace; }
-            pre { background-color: rgba(127, 127, 127, 0.1); padding: 10px; border-radius: 8px; overflow-x: auto; }
-            blockquote { border-left: 4px solid #ccc; padding-left: 1em; color: #666; margin-left: 0; }
+            
+            a {
+                color: \(linkColor);
+                text-decoration: none;
+            }
+            a:hover { text-decoration: underline; }
+            
+            /* Code */
+            code {
+                background-color: \(codeBg);
+                padding: 0.2em 0.4em;
+                border-radius: 3px;
+                font-family: "\(settings.fontFamily)", "Menlo", monospace;
+                font-size: 0.9em;
+            }
+            
+            pre {
+                background-color: \(codeBg);
+                padding: 16px;
+                overflow: auto;
+                border-radius: 6px;
+            }
+            
+            pre code {
+                background-color: transparent;
+                padding: 0;
+            }
+            
+            /* Blockquotes */
+            blockquote {
+                border-left: 3px solid \(settings.style == .bear ? "#cc2222" : "#dfe2e5");
+                color: #6a737d;
+                padding-left: 1em;
+                margin-left: 0;
+            }
+            
+            /* Lists */
             ul, ol { padding-left: 2em; }
             li { margin-bottom: 0.25em; }
-            img { max-width: 100%; height: auto; border-radius: 4px; }
+            
+            /* Images */
+            img { max-width: 100%; border-radius: 4px; }
+            
+            /* Tables */
+            table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
+            th, td { border: 1px solid #dfe2e5; padding: 6px 13px; }
+            tr:nth-child(2n) { background-color: \(codeBg); }
+            
+            /* Specific Style Overrides */
+            \(settings.style == .iaWriter ? """
+            /* iA Writer Style Overrides */
+            h1, h2, h3, h4, h5, h6 { font-weight: 500; }
+            blockquote { border-color: rgba(127,127,127,0.3); }
+            """ : "")
+            
         </style>
         """
     }

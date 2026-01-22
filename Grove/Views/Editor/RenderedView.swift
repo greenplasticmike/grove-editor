@@ -3,6 +3,7 @@ import WebKit
 
 struct RenderedView: NSViewRepresentable {
     let content: String
+    let settings: AppSettings
     
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView()
@@ -13,7 +14,7 @@ struct RenderedView: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {
         let markdownService = MarkdownService()
         let bodyHTML = markdownService.renderToHTML(content)
-        let css = markdownService.getCSS()
+        let css = markdownService.getCSS(settings: settings)
         
         let fullHTML = """
         <!DOCTYPE html>

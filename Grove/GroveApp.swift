@@ -9,5 +9,9 @@ struct GroveApp: App {
         .commands {
             SidebarCommands()
         }
+        
+        Settings {
+            SettingsView()
+        }
     }
 }

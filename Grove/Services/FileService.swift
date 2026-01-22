@@ -20,10 +20,28 @@ class FileService {
     }
     
     func save(content: String, to url: URL) throws {
+        // Ensure we have security-scoped access to the parent directory
+        guard SecurityScopeManager.shared.ensureAccess(for: url) else {
+            throw NSError(
+                domain: "FileServiceError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No security-scoped access to save file at \(url.path)"]
+            )
+        }
+        
         try content.write(to: url, atomically: true, encoding: .utf8)
     }
     
     func read(from url: URL) throws -> String {
+        // Ensure we have security-scoped access to the parent directory
+        guard SecurityScopeManager.shared.ensureAccess(for: url) else {
+            throw NSError(
+                domain: "FileServiceError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No security-scoped access to read file at \(url.path)"]
+            )
+        }
+        
         return try String(contentsOf: url, encoding: .utf8)
     }
 }

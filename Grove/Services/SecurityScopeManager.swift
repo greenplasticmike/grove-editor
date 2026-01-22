@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 class SecurityScopeManager: ObservableObject {
     static let shared = SecurityScopeManager()
@@ -50,7 +51,7 @@ class SecurityScopeManager: ObservableObject {
     private func restoreBookmarks() {
         guard let bookmarks = UserDefaults.standard.dictionary(forKey: bookmarkKey) as? [String: Data] else { return }
         
-        for (path, data) in bookmarks {
+        for (_, data) in bookmarks {
             var isStale = false
             do {
                 let url = try URL(
@@ -65,13 +66,16 @@ class SecurityScopeManager: ObservableObject {
                     saveBookmark(for: url)
                 }
                 
-                // We don't automatically start accessing everything on launch, 
-                // but we could if we wanted to restore the last session.
-                // For now, we just ensure we can resolve them.
-                print("Restored bookmark for: \(url.path)")
+                // Start accessing the security scope so we can use it immediately
+                // This is critical for auto-save to work
+                if startAccessing(url: url) {
+                    print("Restored and started accessing bookmark for: \(url.path)")
+                } else {
+                    print("Failed to start accessing restored bookmark for: \(url.path)")
+                }
                 
             } catch {
-                print("Failed to resolve bookmark for \(path): \(error)")
+                print("Failed to resolve bookmark: \(error)")
             }
         }
     }
@@ -80,5 +84,43 @@ class SecurityScopeManager: ObservableObject {
     func persistPermission(for url: URL) {
         saveBookmark(for: url)
         _ = startAccessing(url: url)
+    }
+    
+    /// Ensure we have access to a file's parent directory for saving
+    func ensureAccess(for fileURL: URL) -> Bool {
+        let parentURL = fileURL.deletingLastPathComponent()
+        
+        // Check if we're already accessing this folder or a parent
+        for accessibleFolder in accessibleFolders {
+            if parentURL.path.hasPrefix(accessibleFolder.path) {
+                return true
+            }
+        }
+        
+        // Try to restore and access if we have a bookmark
+        if let bookmarks = UserDefaults.standard.dictionary(forKey: bookmarkKey) as? [String: Data] {
+            for (_, data) in bookmarks {
+                var isStale = false
+                do {
+                    let url = try URL(
+                        resolvingBookmarkData: data,
+                        options: .withSecurityScope,
+                        relativeTo: nil,
+                        bookmarkDataIsStale: &isStale
+                    )
+                    
+                    if parentURL.path.hasPrefix(url.path) || url.path.hasPrefix(parentURL.path) {
+                        if isStale {
+                            saveBookmark(for: url)
+                        }
+                        return startAccessing(url: url)
+                    }
+                } catch {
+                    continue
+                }
+            }
+        }
+        
+        return false
     }
 }

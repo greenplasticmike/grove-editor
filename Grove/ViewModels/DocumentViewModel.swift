@@ -32,6 +32,11 @@ class DocumentViewModel: ObservableObject {
     }
     
     func saveDocument() {
+        // Ensure we have permission to write to this file's location
+        if !SecurityScopeManager.shared.ensureAccess(for: document.url) {
+            print("Warning: Could not ensure security scope access for \(document.url)")
+        }
+        
         do {
             try fileService.save(content: content, to: document.url)
             // Handle success (maybe update last modified)

@@ -17,10 +17,17 @@ class GitViewModel: ObservableObject {
         }
     }
     
-    func commit(in folderURL: URL) async {
-        guard !commitMessage.isEmpty else { return }
+    func commit(in folderURL: URL) async throws {
+        guard !commitMessage.isEmpty else {
+            throw NSError(domain: "GitViewModelError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Commit message cannot be empty"])
+        }
         
         await MainActor.run { isCommitting = true }
+        defer {
+            Task { @MainActor in
+                self.isCommitting = false
+            }
+        }
         
         do {
             try await gitService.commit(message: commitMessage, in: folderURL)
@@ -29,9 +36,8 @@ class GitViewModel: ObservableObject {
                 self.hasChanges = false
             }
         } catch {
-            print("Commit failed: \(error)")
+            // Re-throw the error so the caller can handle it
+            throw error
         }
-        
-        await MainActor.run { isCommitting = false }
     }
 }

@@ -21,7 +21,7 @@ struct SidebarView: View {
             if viewModel.rootFolder != nil && !viewModel.isGitRepo {
                 Divider()
                 Button(action: viewModel.initGitRepo) {
-                    Label("Initialize Git Repo", systemImage: "git.branch")
+                    Label("Initialize Git Repo", systemImage: "arrow.triangle.branch")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
