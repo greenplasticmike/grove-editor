@@ -20,14 +20,15 @@ Read `Grove_PRD.docx` for the full product requirements document.
 ## Project Structure
 
 ```
-Grove/
-├── Grove.xcodeproj
-├── Grove/
+grove/
+├── grove.xcodeproj
+├── grove/
 │   ├── GroveApp.swift           # App entry point
 │   ├── Models/
 │   │   ├── Document.swift       # Markdown document model
+│   │   ├── FileSystemItem.swift # File tree item model
 │   │   ├── Folder.swift         # Folder/workspace model
-│   │   └── Settings.swift       # User preferences
+│   │   └── Settings.swift       # AppSettings (user preferences model)
 │   ├── Views/
 │   │   ├── ContentView.swift    # Main window layout
 │   │   ├── Sidebar/
@@ -35,25 +36,27 @@ Grove/
 │   │   │   └── FileTreeView.swift
 │   │   ├── Editor/
 │   │   │   ├── EditorView.swift
-│   │   │   ├── RawEditorView.swift
 │   │   │   └── RenderedView.swift
-│   │   └── History/
-│   │       └── HistoryView.swift
+│   │   ├── History/
+│   │   │   └── HistoryView.swift
+│   │   └── Settings/
+│   │       └── SettingsView.swift
 │   ├── ViewModels/
 │   │   ├── DocumentViewModel.swift
 │   │   ├── SidebarViewModel.swift
 │   │   └── GitViewModel.swift
 │   ├── Services/
-│   │   ├── FileService.swift    # File operations, FSEvents
-│   │   ├── GitService.swift     # Git CLI wrapper
-│   │   ├── MarkdownService.swift # Parsing, rendering
-│   │   └── ExportService.swift  # PDF, DOCX export
+│   │   ├── FileService.swift         # File operations, FSEvents
+│   │   ├── GitService.swift          # Git CLI wrapper
+│   │   ├── MarkdownService.swift     # Parsing, rendering
+│   │   ├── ExportService.swift       # PDF, DOCX export
+│   │   ├── SecurityScopeManager.swift # Security-scoped bookmark management
+│   │   └── SettingsManager.swift     # Settings persistence and sync
 │   ├── Utilities/
-│   │   └── KeyboardShortcuts.swift
+│   │   ├── KeyboardShortcuts.swift
+│   │   └── Shell.swift               # Shell command execution
 │   └── Resources/
-│       ├── Assets.xcassets
-│       └── Pandoc/              # Bundled Pandoc binary
-├── GroveTests/
+│       └── Assets.xcassets
 └── README.md
 ```
 
@@ -103,6 +106,35 @@ textChanges
     .sink { [weak self] in self?.saveDocument() }
     .store(in: &cancellables)
 ```
+
+### Settings Management
+
+`SettingsManager` is a singleton that manages `AppSettings` persistence and syncs with `SecurityScopeManager`:
+
+```swift
+class SettingsManager: ObservableObject {
+    static let shared = SettingsManager()
+    @Published var settings: AppSettings {
+        didSet {
+            if !isSyncing { save() }  // Prevent recursion
+        }
+    }
+    
+    private func syncRecentFolders() {
+        // Check if folders actually changed before updating
+        let currentFolders = Set(settings.recentFolders.map { $0.path })
+        let newFolders = Set(SecurityScopeManager.shared.accessibleFolders.map { $0.path })
+        guard currentFolders != newFolders else { return }
+        
+        isSyncing = true
+        settings.recentFolders = SecurityScopeManager.shared.accessibleFolders
+        isSyncing = false
+        save()  // Explicit save after sync
+    }
+}
+```
+
+**Critical:** Always use `isSyncing` flag when updating `settings.recentFolders` to prevent infinite recursion between `didSet` → `save()` → `syncRecentFolders()` → `didSet`.
 
 ### External File Change Detection
 
@@ -183,32 +215,41 @@ Implement using SwiftUI's `.keyboardShortcut()`:
 .keyboardShortcut("s", modifiers: [.command, .shift])  // Save Version (commit)
 ```
 
+**Note:** For macOS 14.0+, use the new `onChange` API without the closure parameter:
+```swift
+.onChange(of: value) {
+    // Handle change
+}
+// Not: .onChange(of: value) { _ in ... }
+```
+
 ## User Preferences
 
-Store in `~/Library/Application Support/Grove/`:
+Settings are managed by `SettingsManager` (singleton) and stored in UserDefaults. The model is `AppSettings` (note: renamed from `Settings` to avoid conflict with SwiftUI's `Settings` scene builder).
 
 ```swift
-struct Settings: Codable {
+struct AppSettings: Codable {
     var defaultView: ViewMode = .rendered  // .raw or .rendered
     var fontFamily: String = "Menlo"
     var fontSize: CGFloat = 14
     var lineHeight: CGFloat = 1.6
     var theme: Theme = .system  // .light, .dark, .system
-    var recentFolders: [URL] = []
+    var style: EditorStyle = .iaWriter  // .iaWriter, .bear, .standard
+    
+    // Recent folders stored as bookmark data (URLs aren't Codable)
+    private var recentFolderBookmarks: [Data] = []
+    var recentFolders: [URL] { get { /* resolve bookmarks */ } set { /* convert to bookmarks */ } }
 }
 ```
 
-Use security-scoped bookmarks to persist folder access:
+**Important:** `SettingsManager` uses an `isSyncing` flag to prevent infinite recursion when syncing `recentFolders` with `SecurityScopeManager`. The sync only updates if folders actually changed, and saves are prevented during sync operations.
+
+Use `SecurityScopeManager` for security-scoped bookmark persistence:
 
 ```swift
-func saveBookmark(for url: URL) throws {
-    let bookmark = try url.bookmarkData(
-        options: .withSecurityScope,
-        includingResourceValuesForKeys: nil,
-        relativeTo: nil
-    )
-    // Store in UserDefaults
-}
+// SecurityScopeManager handles bookmark storage and access
+SecurityScopeManager.shared.persistPermission(for: url)
+// SettingsManager syncs recentFolders automatically
 ```
 
 ## Testing Priorities
@@ -230,9 +271,12 @@ func saveBookmark(for url: URL) throws {
 
 1. **Don't use libgit2** — Shell to git CLI is simpler and leverages user's existing config
 2. **Don't block main thread** — All file and git operations should be async
-3. **Security-scoped bookmarks** — Required for persisting folder access across launches
-4. **Sandbox considerations** — App should be sandboxed; use proper entitlements for file access
-5. **Pandoc bundling** — The macOS arm64 binary is ~30MB; include in app bundle under Resources
+3. **Security-scoped bookmarks** — Required for persisting folder access across launches. Use `SecurityScopeManager` to manage bookmarks and `SettingsManager` to sync with settings.
+4. **Settings recursion** — `SettingsManager.syncRecentFolders()` must use `isSyncing` flag to prevent infinite recursion when updating `settings.recentFolders`. Always check if folders actually changed before updating.
+5. **Naming conflicts** — `AppSettings` struct (not `Settings`) to avoid conflict with SwiftUI's `Settings` scene builder. Use `SwiftUI.Settings { }` for the settings window scene.
+6. **SF Symbols** — Use valid SF Symbols only (e.g., `arrow.triangle.branch` not `git.branch`). Check symbol availability before using.
+7. **Sandbox considerations** — App should be sandboxed; use proper entitlements for file access
+8. **Pandoc bundling** — The macOS arm64 binary is ~30MB; include in app bundle under Resources
 
 ## Build & Run
 
@@ -242,11 +286,11 @@ git clone <repo-url>
 cd Grove
 
 # Open in Xcode
-open Grove.xcodeproj
+open grove.xcodeproj
 
 # Build and run
 # Or use xcodebuild:
-xcodebuild -scheme Grove -configuration Debug build
+xcodebuild -scheme grove -configuration Debug build
 ```
 
 ## Questions?
