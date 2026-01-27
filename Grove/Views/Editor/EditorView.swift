@@ -1,18 +1,22 @@
 import SwiftUI
+import AppKit
 
 struct EditorView: View {
     @StateObject var viewModel: DocumentViewModel
     @StateObject private var gitViewModel = GitViewModel()
     @StateObject private var settingsManager = SettingsManager.shared
     @State private var isFocused: Bool = false
-    @State private var isPreviewMode: Bool = false
+    @State private var isPreviewMode: Bool
     @State private var showCommitSheet: Bool = false
     @State private var showHistory: Bool = false
     @State private var isGitRepo: Bool = false
     @State private var commitError: String?
-    
+    @State private var scrollFraction: CGFloat = 0  // 0.0 to 1.0 position in document
+
     init(document: Document) {
         _viewModel = StateObject(wrappedValue: DocumentViewModel(document: document))
+        // Initialize view mode from settings
+        _isPreviewMode = State(initialValue: SettingsManager.shared.settings.defaultView == .rendered)
     }
     
     private var folderURL: URL {
@@ -28,12 +32,21 @@ struct EditorView: View {
     var body: some View {
         Group {
             if isPreviewMode {
-                RenderedView(content: viewModel.content, settings: settingsManager.settings)
+                RenderedView(
+                    content: viewModel.content,
+                    settings: settingsManager.settings,
+                    scrollFraction: $scrollFraction,
+                    documentURL: viewModel.document.url
+                )
             } else {
-                TextEditor(text: $viewModel.content)
-                    .font(.custom(settingsManager.settings.fontFamily, size: settingsManager.settings.fontSize))
-                    .lineSpacing((settingsManager.settings.lineHeight - 1.0) * settingsManager.settings.fontSize)
-                    .padding()
+                MarkdownTextView(
+                    text: $viewModel.content,
+                    font: NSFont(name: settingsManager.settings.fontFamily, size: settingsManager.settings.fontSize)
+                        ?? NSFont.monospacedSystemFont(ofSize: settingsManager.settings.fontSize, weight: .regular),
+                    lineSpacing: (settingsManager.settings.lineHeight - 1.0) * settingsManager.settings.fontSize,
+                    scrollFraction: $scrollFraction,
+                    documentURL: viewModel.document.url
+                )
             }
         }
         .toolbar {
@@ -53,7 +66,11 @@ struct EditorView: View {
             }
             
             ToolbarItem(placement: .automatic) {
-                Button(action: { isPreviewMode.toggle() }) {
+                Button(action: {
+                    isPreviewMode.toggle()
+                    // Save view mode preference
+                    settingsManager.settings.defaultView = isPreviewMode ? .rendered : .raw
+                }) {
                     Label(isPreviewMode ? "Edit" : "Preview", systemImage: isPreviewMode ? "chevron.left.forwardslash.chevron.right" : "eye")
                 }
                 .keyboardShortcut("p", modifiers: .command)

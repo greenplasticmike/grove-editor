@@ -2,10 +2,74 @@ import Foundation
 import Markdown
 
 class MarkdownService {
-    func renderToHTML(_ content: String) -> String {
-        let document = Markdown.Document(parsing: content)
+    func renderToHTML(_ content: String, novelStyle: Bool = true) -> String {
+        // Pre-process: strip leading tabs from paragraphs to prevent code block interpretation
+        // This handles Bear-style exports where paragraphs are tab-indented
+        var processedContent = novelStyle ? preprocessForNovelStyle(content) : content
+
+        // Pre-process: wrap image URLs with spaces in angle brackets
+        // Markdown requires angle brackets for URLs with spaces: ![alt](<path with spaces>)
+        processedContent = preprocessImageURLs(processedContent)
+
+        let document = Markdown.Document(parsing: processedContent)
         var visitor = HTMLVisitor()
         return visitor.visit(document)
+    }
+
+    /// Strip leading single tabs from lines that look like prose paragraphs (not code blocks)
+    /// A line starting with a single tab followed by a letter is likely a paragraph, not code
+    private func preprocessForNovelStyle(_ content: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        let processedLines = lines.map { line -> String in
+            // If line starts with exactly one tab followed by a non-whitespace character,
+            // it's probably a Bear-style indented paragraph, not a code block
+            if line.hasPrefix("\t") && !line.hasPrefix("\t\t") {
+                let afterTab = line.dropFirst()
+                if let firstChar = afterTab.first, !firstChar.isWhitespace {
+                    return String(afterTab)
+                }
+            }
+            return line
+        }
+        return processedLines.joined(separator: "\n")
+    }
+
+    /// Wrap image URLs containing spaces in angle brackets for proper Markdown parsing
+    /// Converts: ![alt](path with spaces.jpg) → ![alt](<path with spaces.jpg>)
+    private func preprocessImageURLs(_ content: String) -> String {
+        // Match image syntax: ![alt](url) where url contains spaces but no angle brackets
+        // Regex: !\[([^\]]*)\]\(([^)<>]*\s[^)<>]*)\)
+        // - !\[ matches the start of image syntax
+        // - ([^\]]*) captures the alt text (anything except ])
+        // - \]\( matches ](
+        // - ([^)<>]*\s[^)<>]*) captures a URL that has at least one space but no ) < >
+        // - \) matches the closing )
+        let pattern = #"!\[([^\]]*)\]\(([^)<>]*\s[^)<>]*)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return content
+        }
+
+        var result = content
+        let range = NSRange(content.startIndex..., in: content)
+
+        // Process matches in reverse order to preserve indices
+        let matches = regex.matches(in: content, options: [], range: range).reversed()
+        for match in matches {
+            guard let fullRange = Range(match.range, in: result),
+                  let altRange = Range(match.range(at: 1), in: result),
+                  let urlRange = Range(match.range(at: 2), in: result) else {
+                continue
+            }
+
+            let altText = String(result[altRange])
+            let url = String(result[urlRange])
+
+            // Replace with angle-bracketed version
+            let replacement = "![\(altText)](<\(url)>)"
+            result.replaceSubrange(fullRange, with: replacement)
+        }
+
+        return result
     }
     
     func getCSS(settings: AppSettings) -> String {
@@ -85,7 +149,15 @@ class MarkdownService {
                 color: \(textColor);
             }
             
-            p { margin-bottom: 1em; }
+            p {
+                margin-bottom: 1em;
+                \(settings.novelStyleParagraphs ? "text-indent: 1.5em;" : "")
+            }
+
+            /* Don't indent first paragraph after headings or HRs */
+            h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p, hr + p {
+                text-indent: 0;
+            }
             
             a {
                 color: \(linkColor);
@@ -211,7 +283,12 @@ struct HTMLVisitor: MarkupVisitor {
     }
     
     mutating func visitImage(_ image: Image) -> String {
-        let src = image.source ?? ""
+        let rawSrc = image.source ?? ""
+        // URL-encode the path to handle spaces and special characters
+        // .urlPathAllowed includes spaces, so we need a custom set that excludes them
+        var allowedCharacters = CharacterSet.urlPathAllowed
+        allowedCharacters.remove(charactersIn: " ")
+        let src = rawSrc.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? rawSrc
         let alt = image.title ?? ""
         return "<img src=\"\(src)\" alt=\"\(alt)\" />"
     }

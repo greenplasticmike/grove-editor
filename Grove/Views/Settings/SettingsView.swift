@@ -15,7 +15,7 @@ struct SettingsView: View {
                     Label("Editor", systemImage: "doc.text")
                 }
         }
-        .frame(width: 450, height: 250)
+        .frame(width: 450, height: 300)
     }
 }
 
@@ -77,6 +77,11 @@ struct EditorSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: $settingsManager.settings.lineHeight, in: 1.0...2.5, step: 0.1)
+
+            Divider()
+
+            Toggle("Novel-style paragraphs", isOn: $settingsManager.settings.novelStyleParagraphs)
+                .help("Indent first line of paragraphs like a printed book")
         }
         .padding()
     }

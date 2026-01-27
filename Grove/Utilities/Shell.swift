@@ -2,8 +2,21 @@ import Foundation
 
 func shell(_ args: String..., in directory: URL? = nil) async throws -> String {
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    task.arguments = args
+
+    // For git commands, use the direct path to avoid xcrun issues
+    let executable: String
+    var arguments = Array(args)
+
+    if let first = args.first, first == "git" {
+        executable = "/usr/bin/git"
+        arguments = Array(args.dropFirst())
+    } else {
+        executable = "/usr/bin/env"
+        arguments = Array(args)
+    }
+
+    task.executableURL = URL(fileURLWithPath: executable)
+    task.arguments = arguments
     
     if let directory = directory {
         task.currentDirectoryURL = directory

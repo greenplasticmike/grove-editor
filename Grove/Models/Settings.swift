@@ -50,6 +50,7 @@ struct AppSettings: Codable {
     var lineHeight: CGFloat = 1.6
     var theme: Theme = .system
     var style: EditorStyle = .iaWriter
+    var novelStyleParagraphs: Bool = true  // Indent first line of paragraphs like a book
     
     // Store bookmark data instead of URLs since URLs aren't Codable
     // These are synced with SecurityScopeManager
@@ -92,6 +93,7 @@ struct AppSettings: Codable {
         case lineHeight
         case theme
         case style
+        case novelStyleParagraphs
         case recentFolderBookmarks
     }
 }
