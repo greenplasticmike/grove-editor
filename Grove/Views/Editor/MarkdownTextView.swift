@@ -8,6 +8,7 @@ struct MarkdownTextView: NSViewRepresentable {
     var lineSpacing: CGFloat
     @Binding var scrollFraction: CGFloat
     var documentURL: URL?
+    @Binding var isFocusMode: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -118,6 +119,9 @@ struct MarkdownTextView: NSViewRepresentable {
         if textView.font != font {
             applyTextAttributes(to: textView)
         }
+
+        // Apply or clear focus mode when toggled
+        context.coordinator.updateFocusMode(in: textView)
     }
 
     private func applyTextAttributes(to textView: NSTextView) {
@@ -145,6 +149,7 @@ struct MarkdownTextView: NSViewRepresentable {
         var parent: MarkdownTextView
         weak var scrollView: NSScrollView?
         private var isRestoringScroll = false
+        private var currentParagraphRange: NSRange?
 
         init(_ parent: MarkdownTextView) {
             self.parent = parent
@@ -153,6 +158,70 @@ struct MarkdownTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            if parent.isFocusMode {
+                currentParagraphRange = nil  // Force re-evaluation since text changed
+                updateFocusMode(in: textView)
+            }
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            updateFocusMode(in: textView)
+        }
+
+        func updateFocusMode(in textView: NSTextView) {
+            guard parent.isFocusMode else {
+                clearFocusDimming(in: textView)
+                return
+            }
+
+            let nsString = textView.string as NSString
+            guard nsString.length > 0 else { return }
+
+            let cursorLocation = textView.selectedRange().location
+            guard cursorLocation <= nsString.length else { return }
+
+            let safeLoc = min(cursorLocation, nsString.length - 1)
+            let paragraphRange = nsString.paragraphRange(for: NSRange(location: safeLoc, length: 0))
+
+            // Avoid redundant work if cursor is still in same paragraph
+            if let current = currentParagraphRange, current == paragraphRange {
+                return
+            }
+            currentParagraphRange = paragraphRange
+
+            guard let textStorage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: nsString.length)
+
+            textStorage.beginEditing()
+            // Dim all text
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: NSColor.textColor.withAlphaComponent(0.3),
+                range: fullRange
+            )
+            // Restore current paragraph to full opacity
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: NSColor.textColor.withAlphaComponent(1.0),
+                range: paragraphRange
+            )
+            textStorage.endEditing()
+
+            // Ensure typing attributes have full opacity
+            var typingAttrs = textView.typingAttributes
+            typingAttrs[.foregroundColor] = NSColor.textColor.withAlphaComponent(1.0)
+            textView.typingAttributes = typingAttrs
+        }
+
+        func clearFocusDimming(in textView: NSTextView) {
+            guard let textStorage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+            guard fullRange.length > 0 else { return }
+            textStorage.beginEditing()
+            textStorage.addAttribute(.foregroundColor, value: NSColor.textColor, range: fullRange)
+            textStorage.endEditing()
+            currentParagraphRange = nil
         }
 
         @objc func scrollViewDidScroll(_ notification: Notification) {

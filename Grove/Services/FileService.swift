@@ -28,26 +28,55 @@ enum ImageError: LocalizedError {
     }
 }
 
+/// Watches a file for external changes. Retain this object to keep watching.
+/// Call cancel() or let it deinit to stop watching.
+class FileWatcher {
+    private var source: DispatchSourceFileSystemObject?
+    private var fileDescriptor: Int32 = -1
+
+    init(url: URL, onChange: @escaping () -> Void) {
+        let fd = open(url.path, O_EVTONLY)
+        guard fd != -1 else { return }
+        self.fileDescriptor = fd
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .delete, .rename, .extend],
+            queue: .main
+        )
+
+        source.setEventHandler {
+            onChange()
+        }
+
+        source.setCancelHandler { [weak self] in
+            if let fd = self?.fileDescriptor, fd != -1 {
+                close(fd)
+                self?.fileDescriptor = -1
+            }
+        }
+
+        source.resume()
+        self.source = source
+    }
+
+    func cancel() {
+        source?.cancel()
+        source = nil
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
 class FileService {
 
     /// Supported image file extensions
     static let supportedImageExtensions = ["png", "jpg", "jpeg", "gif", "tiff", "tif", "webp", "heic"]
 
-    func watchFile(_ url: URL, onChange: @escaping () -> Void) {
-        let descriptor = open(url.path, O_EVTONLY)
-        guard descriptor != -1 else { return }
-        
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: descriptor,
-            eventMask: .write,
-            queue: .main
-        )
-        
-        source.setEventHandler {
-            onChange()
-        }
-        
-        source.resume()
+    func watchFile(_ url: URL, onChange: @escaping () -> Void) -> FileWatcher {
+        return FileWatcher(url: url, onChange: onChange)
     }
     
     func save(content: String, to url: URL) throws {

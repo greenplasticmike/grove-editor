@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct EditorView: View {
     @StateObject var viewModel: DocumentViewModel
@@ -12,6 +13,9 @@ struct EditorView: View {
     @State private var isGitRepo: Bool = false
     @State private var commitError: String?
     @State private var scrollFraction: CGFloat = 0  // 0.0 to 1.0 position in document
+    @State private var isExporting: Bool = false
+    @State private var exportError: String?
+    @State private var showExportError: Bool = false
 
     init(document: Document) {
         _viewModel = StateObject(wrappedValue: DocumentViewModel(document: document))
@@ -45,7 +49,8 @@ struct EditorView: View {
                         ?? NSFont.monospacedSystemFont(ofSize: settingsManager.settings.fontSize, weight: .regular),
                     lineSpacing: (settingsManager.settings.lineHeight - 1.0) * settingsManager.settings.fontSize,
                     scrollFraction: $scrollFraction,
-                    documentURL: viewModel.document.url
+                    documentURL: viewModel.document.url,
+                    isFocusMode: $isFocused
                 )
             }
         }
@@ -74,6 +79,24 @@ struct EditorView: View {
                     Label(isPreviewMode ? "Edit" : "Preview", systemImage: isPreviewMode ? "chevron.left.forwardslash.chevron.right" : "eye")
                 }
                 .keyboardShortcut("p", modifiers: .command)
+            }
+
+            ToolbarItem(placement: .automatic) {
+                Button(action: { isFocused.toggle() }) {
+                    Label(
+                        isFocused ? "Disable Focus" : "Focus Mode",
+                        systemImage: isFocused ? "eye.circle.fill" : "eye.circle"
+                    )
+                }
+                .keyboardShortcut("d", modifiers: .command)
+            }
+
+            ToolbarItem(placement: .automatic) {
+                Button(action: { exportPDF() }) {
+                    Label("Export PDF", systemImage: "arrow.down.doc")
+                }
+                .keyboardShortcut("e", modifiers: .command)
+                .disabled(isExporting)
             }
         }
         .sheet(isPresented: $showCommitSheet) {
@@ -142,6 +165,77 @@ struct EditorView: View {
         }
         .onChange(of: viewModel.document.url) {
             checkGitStatus()
+        }
+        .alert("File Changed Externally", isPresented: $viewModel.showExternalChangeAlert) {
+            Button("Reload from Disk") {
+                viewModel.reloadFromDisk()
+            }
+            Button("Keep Local Changes", role: .cancel) {
+                viewModel.keepLocalChanges()
+            }
+        } message: {
+            Text("\(viewModel.document.name) has been modified outside Grove.")
+        }
+        .alert("Export Failed", isPresented: $showExportError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportError ?? "An unknown error occurred")
+        }
+    }
+
+    private func exportPDF() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType.pdf]
+        panel.nameFieldStringValue = viewModel.document.name
+            .replacingOccurrences(of: ".md", with: ".pdf")
+            .replacingOccurrences(of: ".markdown", with: ".pdf")
+        panel.title = "Export as PDF"
+        panel.message = "Choose where to save the PDF"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        isExporting = true
+
+        Task {
+            do {
+                let markdownService = MarkdownService()
+                let bodyHTML = markdownService.renderToHTML(
+                    viewModel.content,
+                    novelStyle: settingsManager.settings.novelStyleParagraphs
+                )
+                let css = markdownService.getCSS(settings: settingsManager.settings)
+
+                let fullHTML = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    \(css)
+                </head>
+                <body>
+                    \(bodyHTML)
+                </body>
+                </html>
+                """
+
+                let exportService = ExportService()
+                try await exportService.exportToPDF(html: fullHTML, to: url)
+
+                await MainActor.run {
+                    isExporting = false
+                }
+
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                await MainActor.run {
+                    isExporting = false
+                    exportError = error.localizedDescription
+                    showExportError = true
+                }
+            }
         }
     }
 }
